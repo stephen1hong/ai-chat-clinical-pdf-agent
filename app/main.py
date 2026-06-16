@@ -1,8 +1,10 @@
 """FastAPI application for the Clinical PDF Agent."""
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List
 import uvicorn
+import os
 
 from app.retriever import get_retriever
 from app.router import route_query
@@ -27,6 +29,21 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://voranex.ai",
+        "http://voranex.ai",
+        "https://stephen1hong.github.io",
+        "http://localhost:3000",
+        "http://localhost:5500",
+        "http://127.0.0.1:5500"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Global retriever instance
 retriever = None
@@ -110,9 +127,10 @@ async def chat(request: ChatRequest):
 
 
 if __name__ == "__main__":
+    port = int(os.getenv("PORT", 8000))
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True
+        port=port,
+        reload=False
     )
