@@ -31,4 +31,4 @@ OPENAI_TEMPERATURE = 0.7
 # Dataset configuration
 DATASET_NAME = "zhengyun21/PMC-Patients"
 DATASET_SPLIT = "train"
-MAX_DOCUMENTS = 1000  # Limit for Phase 1 prototype
+MAX_DOCUMENTS = int(os.getenv("MAX_DOCUMENTS", "1000"))  # Limit for Phase 1 prototype (use smaller for Railway)
