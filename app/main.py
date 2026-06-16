@@ -5,9 +5,13 @@ from pydantic import BaseModel, Field
 from typing import List
 import uvicorn
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 from app.retriever import get_retriever
 from app.router import route_query
+import config
 
 
 # Request/Response models
@@ -54,11 +58,44 @@ async def startup_event():
     """Initialize resources on application startup."""
     global retriever
     print("Starting up Clinical PDF Agent...")
+
+    # Check if FAISS index exists, build if not
+    if not config.FAISS_INDEX_PATH.exists() or not config.METADATA_PATH.exists():
+        print("FAISS index not found. Building index from PMC-Patients dataset...")
+        print("This may take 10-15 minutes on first startup...")
+
+        try:
+            # Ensure data directory exists
+            config.FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
+
+            # Run the build_index script
+            build_script = Path(__file__).parent.parent / "scripts" / "build_index.py"
+            result = subprocess.run(
+                [sys.executable, str(build_script)],
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            print(result.stdout)
+            print("Index built successfully!")
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error building index: {e}")
+            print(f"Stdout: {e.stdout}")
+            print(f"Stderr: {e.stderr}")
+            raise Exception("Failed to build FAISS index. Please check the logs.")
+        except Exception as e:
+            print(f"Unexpected error during index building: {e}")
+            raise
+    else:
+        print("FAISS index found.")
+
+    # Load the retriever
     try:
         retriever = get_retriever()
         print("Application ready!")
     except Exception as e:
-        print(f"Error during startup: {e}")
+        print(f"Error loading retriever: {e}")
         raise
 
 
