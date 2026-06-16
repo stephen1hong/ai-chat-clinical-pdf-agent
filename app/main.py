@@ -7,6 +7,8 @@ import uvicorn
 import os
 import subprocess
 import sys
+import asyncio
+import threading
 from pathlib import Path
 
 from app.retriever import get_retriever
@@ -51,6 +53,44 @@ app.add_middleware(
 
 # Global retriever instance
 retriever = None
+index_building = False
+
+
+def build_index_background():
+    """Build FAISS index in background thread."""
+    global retriever, index_building
+    index_building = True
+
+    try:
+        print("FAISS index not found. Building index from PMC-Patients dataset...")
+        print(f"Using MAX_DOCUMENTS={config.MAX_DOCUMENTS} (this may take a few minutes)...")
+
+        # Ensure data directory exists
+        config.FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Run the build_index script
+        build_script = Path(__file__).parent.parent / "scripts" / "build_index.py"
+        result = subprocess.run(
+            [sys.executable, str(build_script)],
+            check=True,
+            capture_output=True,
+            text=True
+        )
+        print(result.stdout)
+        print("Index built successfully!")
+
+        # Load the retriever
+        retriever = get_retriever()
+        print("Application ready!")
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error building index: {e}")
+        print(f"Stdout: {e.stdout}")
+        print(f"Stderr: {e.stderr}")
+    except Exception as e:
+        print(f"Unexpected error during index building: {e}")
+    finally:
+        index_building = False
 
 
 @app.on_event("startup")
@@ -59,44 +99,21 @@ async def startup_event():
     global retriever
     print("Starting up Clinical PDF Agent...")
 
-    # Check if FAISS index exists, build if not
+    # Check if FAISS index exists
     if not config.FAISS_INDEX_PATH.exists() or not config.METADATA_PATH.exists():
-        print("FAISS index not found. Building index from PMC-Patients dataset...")
-        print("This may take 10-15 minutes on first startup...")
-
-        try:
-            # Ensure data directory exists
-            config.FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
-
-            # Run the build_index script
-            build_script = Path(__file__).parent.parent / "scripts" / "build_index.py"
-            result = subprocess.run(
-                [sys.executable, str(build_script)],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-            print(result.stdout)
-            print("Index built successfully!")
-
-        except subprocess.CalledProcessError as e:
-            print(f"Error building index: {e}")
-            print(f"Stdout: {e.stdout}")
-            print(f"Stderr: {e.stderr}")
-            raise Exception("Failed to build FAISS index. Please check the logs.")
-        except Exception as e:
-            print(f"Unexpected error during index building: {e}")
-            raise
+        # Build index in background thread so server can start immediately
+        thread = threading.Thread(target=build_index_background, daemon=True)
+        thread.start()
+        print("Index building started in background. Server is ready to accept health checks.")
     else:
-        print("FAISS index found.")
-
-    # Load the retriever
-    try:
-        retriever = get_retriever()
-        print("Application ready!")
-    except Exception as e:
-        print(f"Error loading retriever: {e}")
-        raise
+        # Load existing index
+        print("FAISS index found. Loading...")
+        try:
+            retriever = get_retriever()
+            print("Application ready!")
+        except Exception as e:
+            print(f"Error loading retriever: {e}")
+            raise
 
 
 @app.get("/")
@@ -117,10 +134,13 @@ async def root():
 async def health_check():
     """Health check endpoint - returns healthy even during index building."""
     if retriever is None:
+        state = "building" if index_building else "starting"
+        message = "Index is being built, please wait..." if index_building else "Starting up..."
+
         return {
             "status": "healthy",
-            "state": "building",
-            "message": "Index is being built, please wait...",
+            "state": state,
+            "message": message,
             "retriever_loaded": False,
             "index_size": 0
         }
@@ -133,6 +153,7 @@ async def health_check():
     return {
         "status": "healthy",
         "state": "ready",
+        "message": "Ready to answer questions",
         "retriever_loaded": True,
         "index_size": index_size
     }
