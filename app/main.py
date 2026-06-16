@@ -115,11 +115,26 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
+    """Health check endpoint - returns healthy even during index building."""
+    if retriever is None:
+        return {
+            "status": "healthy",
+            "state": "building",
+            "message": "Index is being built, please wait...",
+            "retriever_loaded": False,
+            "index_size": 0
+        }
+
+    try:
+        index_size = retriever.index.ntotal if hasattr(retriever, 'index') else 0
+    except:
+        index_size = 0
+
     return {
         "status": "healthy",
-        "retriever_loaded": retriever is not None,
-        "index_size": retriever.index.ntotal if retriever else 0
+        "state": "ready",
+        "retriever_loaded": True,
+        "index_size": index_size
     }
 
 
